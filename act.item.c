@@ -49,8 +49,6 @@ static void perform_wear(struct char_data *ch, struct obj_data *obj, int where);
 static void wear_message(struct char_data *ch, struct obj_data *obj, int where);
 
 
-
-
 static void perform_put(struct char_data *ch, struct obj_data *obj, struct obj_data *cont)
 {
 
@@ -76,8 +74,16 @@ static void perform_put(struct char_data *ch, struct obj_data *obj, struct obj_d
       SET_BIT_AR(GET_OBJ_EXTRA(cont), ITEM_NODROP);
       act("You get a strange feeling as you put $p in $P.", FALSE,
                 ch, obj, cont, TO_CHAR);
-    } else
+    } else {
       act("You put $p in $P.", FALSE, ch, obj, cont, TO_CHAR);
+  
+      /* did they put away the thing that was allowing them to fly? */
+      if ((GET_POS(ch) == POS_FLYING) && !has_flight(ch)) {
+        send_to_char(ch, "You land on the ground.\r\n");
+        act("$n stops hovering, and settles to the ground.", TRUE, ch, 0, 0, TO_ROOM);
+        GET_POS(ch) = POS_STANDING;
+      }
+    }
   }
 }
 
@@ -197,7 +203,7 @@ static void get_check_money(struct char_data *ch, struct obj_data *obj)
   if (value == 1)
     send_to_char(ch, "There was 1 coin.\r\n");
   else
-    send_to_char(ch, "There were %d coins.\r\n", value);
+    send_to_char(ch, "There were %s coins.\r\n", add_commas(value));
 }
 
 static void perform_get_from_container(struct char_data *ch, struct obj_data *obj,
@@ -461,6 +467,13 @@ static int perform_drop(struct char_data *ch, struct obj_data *obj,
   act(buf, TRUE, ch, obj, 0, TO_ROOM);
 
   obj_from_char(obj);
+  
+  /* did they drop the thing that was allowing them to fly? */
+  if ((GET_POS(ch) == POS_FLYING) && !has_flight(ch)) {
+    send_to_char(ch, "You land on the ground.\r\n");
+    act("$n stops hovering, and settles to the ground.", TRUE, ch, 0, 0, TO_ROOM);
+    GET_POS(ch) = POS_STANDING;
+  }
 
   if ((mode == SCMD_DONATE) && OBJ_FLAGGED(obj, ITEM_NODONATE))
     mode = SCMD_JUNK;
@@ -625,6 +638,13 @@ static void perform_give(struct char_data *ch, struct char_data *vict,
   act("You give $p to $N.", FALSE, ch, obj, vict, TO_CHAR);
   act("$n gives you $p.", FALSE, ch, obj, vict, TO_VICT);
   act("$n gives $p to $N.", TRUE, ch, obj, vict, TO_NOTVICT);
+  
+  /* did they give away the thing that was allowing them to fly? */
+  if ((GET_POS(ch) == POS_FLYING) && !has_flight(ch)) {
+    send_to_char(ch, "You land on the ground.\r\n");
+    act("$n stops hovering, and settles to the ground.", TRUE, ch, 0, 0, TO_ROOM);
+    GET_POS(ch) = POS_STANDING;
+  }  
   
   autoquest_trigger_check( ch, vict, obj, AQ_OBJ_RETURN);
 }
@@ -1190,6 +1210,9 @@ static void wear_message(struct char_data *ch, struct obj_data *obj, int where)
   
     {"$n wears $p on $s arms.",
     "You wear $p on your arms."},
+    
+	{"$n straps $p around $s arm as a shield.",
+    "You start to use $p as a shield."},
 	
 	{"$n puts $p on around $s right wrist.",
     "You put $p on around your right wrist."},
@@ -1205,9 +1228,6 @@ static void wear_message(struct char_data *ch, struct obj_data *obj, int where)
 
     {"$n slides $p on to $s left ring finger.",
     "You slide $p on to your left ring finger."},
-	
-	{"$n straps $p around $s arm as a shield.",
-    "You start to use $p as a shield."},
 	
     {"$n lights $p and holds it.",
     "You light $p and hold it."},
@@ -1249,8 +1269,8 @@ static void perform_wear(struct char_data *ch, struct obj_data *obj, int where)
 
   int wear_bitvectors[] = {
     ITEM_WEAR_HEAD, ITEM_WEAR_FACE, ITEM_WEAR_NECK, ITEM_WEAR_NECK, ITEM_WEAR_BODY,
-	ITEM_WEAR_ABOUT, ITEM_WEAR_BACK, ITEM_WEAR_ARMS, ITEM_WEAR_WRIST, ITEM_WEAR_WRIST,
-	ITEM_WEAR_HANDS, ITEM_WEAR_FINGER, ITEM_WEAR_FINGER, ITEM_WEAR_SHIELD,
+	ITEM_WEAR_ABOUT, ITEM_WEAR_BACK, ITEM_WEAR_ARMS, ITEM_WEAR_SHIELD, ITEM_WEAR_WRIST, ITEM_WEAR_WRIST,
+	ITEM_WEAR_HANDS, ITEM_WEAR_FINGER, ITEM_WEAR_FINGER,
     ITEM_WEAR_TAKE, ITEM_WEAR_WIELD, ITEM_WEAR_WIELD, ITEM_WEAR_TAKE, ITEM_WEAR_WAIST, ITEM_WEAR_LEGS,
     ITEM_WEAR_FEET
   };
@@ -1264,12 +1284,12 @@ static void perform_wear(struct char_data *ch, struct obj_data *obj, int where)
 	"You're already wearing something about your body.\r\n",
 	"You're already wearing something on your back.\r\n",
 	"You're already wearing something on your arms.\r\n",
+	"You're already using a shield.\r\n",
 	"YOU SHOULD NEVER SEE THIS MESSAGE.  PLEASE REPORT.\r\n",
     "You're already wearing something around both of your wrists.\r\n",
 	"You're already wearing something on your hands.\r\n",
 	"YOU SHOULD NEVER SEE THIS MESSAGE.  PLEASE REPORT.\r\n",
     "You're already wearing something on both of your ring fingers.\r\n",
-	"You're already using a shield.\r\n",
     "You're already using a light.\r\n",
     "YOU SHOULD NEVER SEE THIS MESSAGE.  PLEASE REPORT.\r\n",
 	"You're already wielding a weapon in both hands.\r\n",
@@ -1527,6 +1547,13 @@ static void perform_remove(struct char_data *ch, int pos)
     obj_to_char(unequip_char(ch, pos), ch);
     act("You stop using $p.", FALSE, ch, obj, 0, TO_CHAR);
     act("$n stops using $p.", TRUE, ch, obj, 0, TO_ROOM);
+    
+    /* did they give remove the thing that was allowing them to fly? */
+    if ((GET_POS(ch) == POS_FLYING) && !has_flight(ch)) {
+      send_to_char(ch, "You land on the ground.\r\n");
+      act("$n stops hovering, and settles to the ground.", TRUE, ch, 0, 0, TO_ROOM);
+      GET_POS(ch) = POS_STANDING;
+    }
   }
 }
 

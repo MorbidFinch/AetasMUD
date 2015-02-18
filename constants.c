@@ -92,6 +92,7 @@ const char *room_bits[] = {
   "*",				/* The BFS Mark. */
   "WORLDMAP",
   "!TEL",
+  "ARENA",
   "\n"
 };
 
@@ -106,6 +107,7 @@ const char *zone_bits[] = {
   "NOBUILD",
   "!ASTRAL",
   "WORLDMAP",
+  "ARENA",
   "\n"
 };
 
@@ -161,6 +163,7 @@ const char *position_types[] = {
   "Sitting",
   "Fighting",
   "Standing",
+  "Flying",
   "\n"
 };
 
@@ -188,11 +191,7 @@ const char *player_bits[] = {
   "IBT_BUG",
   "IBT_IDEA",
   "IBT_TYPO",
-  "UNUSED1",
-  "UNUSED2",
-  "UNUSED3",
-  "UNUSED4",
-  "UNUSED5",
+  "ARENA",
   "\n"
 };
 
@@ -292,7 +291,7 @@ const char *affected_bits[] =
   "PROT-GOOD",
   "SLEEP",
   "NO_TRACK",
-  "FLY",
+  "FLIGHT",
   "SCUBA",
   "SNEAK",
   "HIDE",
@@ -369,12 +368,12 @@ const char *wear_where[] = {
   "\tg<worn about body>\tn    ",
   "\tg<worn on back>\tn       ",
   "\tg<worn on arms>\tn       ",
+  "\tg<worn as shield>\tn     ",
   "\tg<worn around wrist>\tn  ",
   "\tg<worn around wrist>\tn  ",
   "\tg<worn on hands>\tn      ",
   "\tg<worn on finger>\tn     ",
   "\tg<worn on finger>\tn     ",
-  "\tg<worn as shield>\tn     ",
   "\tg<used as light>\tn      ",
   "\tg<wielded>\tn            ",
   "\tg<second wielded>\tn     ",
@@ -396,12 +395,12 @@ const char *equipment_types[] = {
   "Worn about body",
   "Worn on back",
   "Worn on arms",
+  "Worn as shield",
   "Worn around right wrist",
   "Worn around left wrist",
   "Worn on hands",
   "Worn on right finger",
   "Worn on left finger",
-  "Worn as shield",
   "Used as light",
   "Wielded",
   "Second wielded",
@@ -455,10 +454,10 @@ const char *wear_bits[] = {
   "ABOUT",
   "BACK",
   "ARMS",
+  "SHIELD",
   "WRIST",
   "HANDS",
   "FINGER",
-  "SHIELD",
   "WIELD",
   "HOLD",
   "WAIST",
@@ -885,6 +884,20 @@ int rev_dir[] =
   SOUTHWEST,
   NORTHWEST,
   NORTHEAST
+};
+
+const char *from_dirs[] = {
+    "the south",
+    "the west",
+    "the north",
+    "the east",
+    "below",
+    "above",
+    "the southeast",
+    "the southwest",
+    "the northwest",
+    "the northeast",
+    "\n"
 };
 
 /** How much movement is lost moving through a particular sector type. */

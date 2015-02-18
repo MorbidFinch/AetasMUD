@@ -96,9 +96,10 @@
 #define ROOM_OLC           14   /**< (R) Modifyable/!compress */
 #define ROOM_BFS_MARK      15   /**< (R) breath-first srch mrk */
 #define ROOM_WORLDMAP      16   /**< World-map style maps here */
-#define ROOM_NOTELEPORT	   17   // Room cannot be teleported into
+#define ROOM_NOTELEPORT	   17   /**< Room cannot be teleported into */
+#define ROOM_ARENA         18   /**< Deaths in this room are arena */
 /** The total number of Room Flags */
-#define NUM_ROOM_FLAGS    18
+#define NUM_ROOM_FLAGS     19
 
 /* Zone info: Used in zone_data.zone_flags */
 #define ZONE_CLOSED       0  /**< Zone is closed - players cannot enter */
@@ -107,9 +108,10 @@
 #define ZONE_GRID         3  /**< Zone is 'on the grid', connected, show on 'areas' */
 #define ZONE_NOBUILD      4  /**< Building is not allowed in the zone */
 #define ZONE_NOASTRAL     5  /**< No teleportation magic will work to or from this zone */
-#define ZONE_WORLDMAP     6 /**< Whole zone uses the WORLDMAP by default */
+#define ZONE_WORLDMAP     6  /**< Whole zone uses the WORLDMAP by default */
+#define ZONE_ARENA        7  /**< Deaths in zone are arena */
 /** The total number of Zone Flags */
-#define NUM_ZONE_FLAGS    7
+#define NUM_ZONE_FLAGS    8
 
 /* Exit info: used in room_data.dir_option.exit_info */
 #define EX_ISDOOR     (1 << 0)   /**< Exit is a door		*/
@@ -172,7 +174,6 @@
 /** Total number of available Classes */
 #define NUM_CLASSES	  	  12
 
-
 /* Races */
 #define RACE_UNDEFINED   	-1
 #define RACE_ELF          	0
@@ -194,7 +195,6 @@
 // Total number of available Races
 #define NUM_RACES			15
 
-
 /* Sex */
 #define SEX_NEUTRAL   0   /**< Neutral Sex (Hermaphrodite) */
 #define SEX_MALE      1   /**< Male Sex (XY Chromosome) */
@@ -212,8 +212,9 @@
 #define POS_SITTING    6	/**< Position = sitting	*/
 #define POS_FIGHTING   7	/**< Position = fighting */
 #define POS_STANDING   8	/**< Position = standing */
+#define POS_FLYING     9	/**< Position = flying */
 /** Total number of positions. */
-#define NUM_POSITIONS   9
+#define NUM_POSITIONS   10
 
 /* Player flags: used by char_data.char_specials.act */
 #define PLR_KILLER        0   /**< Player is a player-killer */
@@ -236,6 +237,7 @@
 #define PLR_BUG          17   /**< Player is writing a bug */
 #define PLR_IDEA         18   /**< Player is writing an idea */
 #define PLR_TYPO         19   /**< Player is writing a typo */
+#define PLR_ARENA        20   /**< Player is arena-saved */
 
 /* Mobile flags: used by char_data.char_specials.act */
 #define MOB_SPEC            0   /**< Mob has a callable spec-proc */
@@ -324,7 +326,7 @@
 #define AFF_PROTECT_GOOD   14   /**< Char protected from good */
 #define AFF_SLEEP          15   /**< (R) Char magically asleep */
 #define AFF_NOTRACK        16   /**< Char can't be tracked */
-#define AFF_FLYING         17   /**< Char is flying */
+#define AFF_FLIGHT         17   /**< Char can fly */
 #define AFF_SCUBA          18   /**< Room for future expansion */
 #define AFF_SNEAK          19   /**< Char can move quietly */
 #define AFF_HIDE           20   /**< Char is hidden */
@@ -384,7 +386,6 @@
 #define CON_GET_PROTOCOL 47 /**< Used at log-in while attempting to get protocols > */
 #define CON_MSGEDIT      48 /**< OLC mode - message editor */
 
-
 /* OLC States range - used by IS_IN_OLC and IS_PLAYING */
 #define FIRST_OLC_STATE CON_OEDIT     /**< The first CON_ state that is an OLC */
 #define LAST_OLC_STATE  CON_MSGEDIT   /**< The last CON_ state that is an OLC  */
@@ -402,12 +403,12 @@
 #define WEAR_ABOUT      5  /**< Equipment Location about body (like a cape)*/
 #define WEAR_BACK		6  /**< Equipment Location back */
 #define WEAR_ARMS       7  /**< Equipment Location Arms */
-#define WEAR_WRIST_R    8  /**< Equipment Location Right Wrist */
-#define WEAR_WRIST_L    9  /**< Equipment Location Left Wrist */
-#define WEAR_HANDS      10  /**< Equipment Location Hands */
-#define WEAR_FINGER_R   11  /**< Equipment Location Right Finger */
-#define WEAR_FINGER_L   12 /**< Equipment Location Left Finger */
-#define WEAR_SHIELD     13 /**< Equipment Location Shield */
+#define WEAR_SHIELD     8 /**< Equipment Location Shield */
+#define WEAR_WRIST_R    9  /**< Equipment Location Right Wrist */
+#define WEAR_WRIST_L    10  /**< Equipment Location Left Wrist */
+#define WEAR_HANDS      11  /**< Equipment Location Hands */
+#define WEAR_FINGER_R   12  /**< Equipment Location Right Finger */
+#define WEAR_FINGER_L   13 /**< Equipment Location Left Finger */
 #define WEAR_LIGHT      14 /**< Equipment Location Light */
 #define WEAR_WIELD      15 /**< Equipment Location Weapon */
 #define WEAR_2WIELD		16 /**< Equipment Location 2nd Wield */
@@ -456,16 +457,15 @@
 #define ITEM_WEAR_ABOUT	    5   /**< Item can be worn about body */
 #define ITEM_WEAR_BACK		6   /**< Item can be worn on back */
 #define ITEM_WEAR_ARMS      7   /**< Item can be worn on arms */
-#define ITEM_WEAR_WRIST	    8   /**< Item can be worn on wrist */
-#define ITEM_WEAR_HANDS	    9   /**< Item can be worn on hands	*/
-#define ITEM_WEAR_FINGER   10   /**< Item can be worn on finger */
-#define ITEM_WEAR_SHIELD   11   /**< Item can be used as a shield */
+#define ITEM_WEAR_SHIELD    8   /**< Item can be used as a shield */
+#define ITEM_WEAR_WRIST	    9   /**< Item can be worn on wrist */
+#define ITEM_WEAR_HANDS	   10   /**< Item can be worn on hands	*/
+#define ITEM_WEAR_FINGER   11   /**< Item can be worn on finger */
 #define ITEM_WEAR_WIELD	   12   /**< Item can be wielded */
 #define ITEM_WEAR_HOLD     13   /**< Item can be held */
 #define ITEM_WEAR_WAIST    14   /**< Item can be worn around waist */
 #define ITEM_WEAR_LEGS     15   /**< Item can be worn on legs */
 #define ITEM_WEAR_FEET     16   /**< Item can be worn on feet */
-
 /** Total number of item wears */
 #define NUM_ITEM_WEARS    17
 
@@ -500,7 +500,7 @@
 #define ITEM_ANTI_DRUID    		10	/* Not usable by druids	        */
 #define ITEM_ANTI_THIEF    		11	/* Not usable by thieves	*/
 #define ITEM_ANTI_PSIONICIST  	12	/* Not usable by psionicists	*/
-
+/** Total number of anti class flags */
 #define NUM_ANTICLASS_FLAGS     13
 
 /* NEED flags: used by obj_data.obj_flags.need_class_flags */
@@ -514,11 +514,10 @@
 #define ITEM_NEED_DRUID    		7	/* Not usable by druids	        */
 #define ITEM_NEED_THIEF    		8	/* Not usable by thieves	*/
 #define ITEM_NEED_PSIONICIST  	9	/* Not usable by psionicists	*/
-
+/** Total number of need class flags */
 #define NUM_NEEDCLASS_FLAGS     10
 
 /* ANTI race flags: used by obj_data.obj_flags.anti_race_flags */
-
 #define ITEM_ANTI_ELF      		0   /* Not usable by elves          */
 #define ITEM_ANTI_DWARF    		1   /* Not usable by dwarves        */
 #define ITEM_ANTI_HUMAN    		2    /* Not usable by humans         */
@@ -526,7 +525,7 @@
 #define ITEM_ANTI_HALF_ORC  	4    /* Not usable by half orcs     */
 #define ITEM_ANTI_HALF_OGRE  	5    /* Not usable by half ogres   */
 #define ITEM_ANTI_BAKALI     	6    /* Not usable by bakali       */
-
+/** Total number of anti race flags */
 #define NUM_ANTIRACE_FLAGS		7
 
 /* Modifier constants used with obj affects ('A' fields) */
@@ -1127,6 +1126,10 @@ struct player_special_data_saved
   int soul_points;		  /* Number of soul points */
   int rip_cnt;		  	  /* Number of deaths */
   int kill_cnt;		  	  /* Number of kills */
+  int pk_rip_cnt;		  /* Number of PK deaths */
+  int pk_kill_cnt;		  /* Number of PK kills */
+  int arena_rip_cnt;      /* Number of arena deaths */
+  int arena_kill_cnt;     /* Number of arena kills */
   int dt_cnt;		  	  /* Number of DTs hit */
   qst_vnum *completed_quests;   /**< Quests completed              */
   int    num_completed_quests;  /**< Number completed              */

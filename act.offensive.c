@@ -85,7 +85,8 @@ ACMD(do_hit)
     if (!CONFIG_PK_ALLOWED && !IS_NPC(vict) && !IS_NPC(ch)) 
 	check_killer(ch, vict);
 
-    if ((GET_POS(ch) == POS_STANDING) && (vict != FIGHTING(ch))) {
+    if ((GET_POS(ch) >= POS_STANDING) && (vict != FIGHTING(ch))) {
+      GET_POS(ch) = POS_STANDING;
       if (GET_DEX(ch) > GET_DEX(vict) || (GET_DEX(ch) == GET_DEX(vict) && rand_number(1, 2) == 1))  /* if faster */
         hit(ch, vict, TYPE_UNDEFINED);  /* first */
       else hit(vict, ch, TYPE_UNDEFINED);  /* or the victim is first */
@@ -147,8 +148,9 @@ ACMD(do_backstab)
     send_to_char(ch, "You need to wield a weapon to make it a success.\r\n");
     return;
   }
-  if (GET_OBJ_VAL(GET_EQ(ch, WEAR_WIELD), 3) != TYPE_PIERCE - TYPE_HIT) {
-    send_to_char(ch, "Only piercing weapons can be used for backstabbing.\r\n");
+  if ((GET_OBJ_VAL(GET_EQ(ch, WEAR_WIELD), 3) != TYPE_PIERCE - TYPE_HIT) && 
+      (GET_OBJ_VAL(GET_EQ(ch, WEAR_WIELD), 3) != TYPE_STAB - TYPE_HIT)) {
+    send_to_char(ch, "Only stabbing or piercing weapons can be used for backstabbing.\r\n");
     return;
   }
   if (FIGHTING(vict)) {

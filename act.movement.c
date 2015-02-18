@@ -44,7 +44,7 @@ static int has_boat(struct char_data *ch)
   if (GET_LEVEL(ch) > LVL_IMMORT)
     return (1);
 
-  if (AFF_FLAGGED(ch, AFF_WATERWALK) || AFF_FLAGGED(ch, AFF_FLYING))
+  if (AFF_FLAGGED(ch, AFF_WATERWALK) || (GET_POS(ch) == POS_FLYING))
     return (1);
 
   /* non-wearable boats in inventory will do it */
@@ -69,17 +69,17 @@ int has_flight(struct char_data *ch)
   if (GET_LEVEL(ch) > LVL_IMMORT)
     return (1);
 
-  if (AFF_FLAGGED(ch, AFF_FLYING))
+  if (AFF_FLAGGED(ch, AFF_FLIGHT))
     return (1);
 
   /* Non-wearable flying items in inventory will do it. */
   for (obj = ch->carrying; obj; obj = obj->next_content)
-    if (OBJAFF_FLAGGED(obj, AFF_FLYING) && OBJAFF_FLAGGED(obj, AFF_FLYING))
+    if (OBJAFF_FLAGGED(obj, AFF_FLIGHT) && (find_eq_pos(ch, obj, NULL) < 0) && !CAN_WEAR(obj, ITEM_WEAR_WIELD))
       return (1);
 
-  /* Any equipped objects with AFF_FLYING will do it too. */
+  /* Any equipped objects with AFF_FLIGHT will do it too. */
   for (i = 0; i < NUM_WEARS; i++)
-    if (GET_EQ(ch, i) && OBJAFF_FLAGGED(GET_EQ(ch, i), AFF_FLYING))
+    if (GET_EQ(ch, i) && OBJAFF_FLAGGED(GET_EQ(ch, i), AFF_FLIGHT))
       return (1);
 
   return (0);
@@ -142,6 +142,8 @@ int do_simple_move(struct char_data *ch, int dir, int need_specials_check)
   int need_movement = 0;
   /* Contains the "leave" message to display to the was_in room. */
   char leave_message[SMALL_BUFSIZE];
+  /* Contains the "arrive" message to display to the going_to room. */
+  char arrive_message[SMALL_BUFSIZE];
   /*---------------------------------------------------------------------*/
   /* End Local variable definitions */
 
@@ -187,7 +189,7 @@ int do_simple_move(struct char_data *ch, int dir, int need_specials_check)
   /* Flying Required: Does lack of flying prevent movement? */
   if ((SECT(was_in) == SECT_FLYING) || (SECT(going_to) == SECT_FLYING))
   {
-    if (!has_flight(ch))
+    if (GET_POS(ch) != POS_FLYING)
     {
       send_to_char(ch, "You need to be flying to go there!\r\n");
       return (0);
@@ -270,13 +272,26 @@ int do_simple_move(struct char_data *ch, int dir, int need_specials_check)
   /* Begin: the leave operation. */
   /*---------------------------------------------------------------------*/
   /* If applicable, subtract movement cost. */
-  if (GET_LEVEL(ch) < LVL_IMMORT && !IS_NPC(ch))
-    GET_MOVE(ch) -= need_movement;
+  if (GET_LEVEL(ch) < LVL_IMMORT && !IS_NPC(ch)) {
+    if (GET_POS(ch) == POS_FLYING)
+      GET_MOVE(ch) -= need_movement / 2;
+    else
+      GET_MOVE(ch) -= need_movement;
+  }
 
   /* Generate the leave message and display to others in the was_in room. */
-  if (!AFF_FLAGGED(ch, AFF_SNEAK))
-  {
-    snprintf(leave_message, sizeof(leave_message), "$n leaves %s.", dirs[dir]);
+  if (!AFF_FLAGGED(ch, AFF_SNEAK)) {
+    switch(GET_POS(ch)) {
+      case POS_FLYING:
+        snprintf(leave_message, sizeof(leave_message), "$n flies %s.", dirs[dir]);
+        break;
+      case POS_STANDING:
+        snprintf(leave_message, sizeof(leave_message), "$n walks %s.", dirs[dir]);
+        break;
+      default:
+        snprintf(leave_message, sizeof(leave_message), "$n leaves %s.", dirs[dir]);
+        break;
+    }
     act(leave_message, TRUE, ch, 0, 0, TO_ROOM);
   }
 
@@ -299,9 +314,21 @@ int do_simple_move(struct char_data *ch, int dir, int need_specials_check)
   }
 
   /* Display arrival information to anyone in the destination room... */
-  if (!AFF_FLAGGED(ch, AFF_SNEAK))
-    act("$n has arrived.", TRUE, ch, 0, 0, TO_ROOM);
-
+  if (!AFF_FLAGGED(ch, AFF_SNEAK)) {
+    switch(GET_POS(ch)) {
+      case POS_FLYING:
+        snprintf(arrive_message, sizeof(arrive_message), "$n flies in from %s.", from_dirs[dir]);
+        break;
+      case POS_STANDING:
+        snprintf(arrive_message, sizeof(arrive_message), "$n walks in from %s.", from_dirs[dir]);
+        break;
+      default:
+        snprintf(arrive_message, sizeof(arrive_message), "$n has arrived from %s.", from_dirs[dir]);
+        break;
+    }
+    act(arrive_message, TRUE, ch, 0, 0, TO_ROOM);
+  }
+    
   /* ... and the room description to the character. */
   if (ch->desc != NULL)
     look_at_room(ch, 0);
@@ -728,11 +755,50 @@ ACMD(do_leave)
   }
 }
 
+ACMD(do_fly)
+{
+  if (!has_flight(ch))
+    send_to_char(ch, "You lack the ability to fly.\r\n");
+  else {
+    switch (GET_POS(ch)) {
+    case POS_FLYING:
+      send_to_char(ch, "You are already flying.\r\n");
+      break;
+    case POS_STANDING:
+      send_to_char(ch, "Your feet lift from the ground.\r\n");
+      act("$n begins to hover above the ground!", TRUE, ch, 0, 0, TO_ROOM);
+      GET_POS(ch) = POS_FLYING;
+      break;
+    case POS_SITTING:
+    case POS_RESTING:
+      send_to_char(ch, "You need to be standing first.\r\n");
+      break;
+    case POS_SLEEPING:
+      send_to_char(ch, "You have to wake up first!\r\n");
+      break;
+    case POS_FIGHTING:
+      send_to_char(ch, "You are busy fighting at the moment!\r\n");
+      break;
+    default:
+      send_to_char(ch, "You stop floating around, and put your feet on the ground.\r\n");
+      act("$n stops floating around, and puts $s feet on the ground.",
+	  TRUE, ch, 0, 0, TO_ROOM);
+      GET_POS(ch) = POS_STANDING;
+    break;
+    }
+  }
+}
+
 ACMD(do_stand)
 {
   switch (GET_POS(ch)) {
   case POS_STANDING:
     send_to_char(ch, "You are already standing.\r\n");
+    break;
+  case POS_FLYING:
+    send_to_char(ch, "You land on the ground.\r\n");
+    act("$n stops hovering, and settles to the ground.", TRUE, ch, 0, 0, TO_ROOM);
+    GET_POS(ch) = POS_STANDING;
     break;
   case POS_SITTING:
     send_to_char(ch, "You stand up.\r\n");

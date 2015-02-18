@@ -2429,6 +2429,8 @@ ACMD(do_wizutil)
     for(taeller=0; taeller < AF_ARRAY_MAX; taeller++)
       AFF_FLAGS(vict)[taeller] = 0;
     send_to_char(vict, "There is a brief flash of light!\r\nYou feel slightly different.\r\n");
+    if (GET_POS(ch) == POS_FLYING);
+      GET_POS(ch) = POS_STANDING;
 	send_to_char(ch, "All spells removed.\r\n");
       } else {
 	send_to_char(ch, "Your victim does not have any affections!\r\n");
@@ -3406,11 +3408,11 @@ static int perform_set(struct char_data *ch, struct char_data *vict, int mode, c
       GET_GEN(vict) = RANGE(0, 10);
       break;
 	case 61: /* soul points */
-	if (value < 0 || value > 100) {	/* Arbitrary limits. */
-        send_to_char(ch, "0 to 100 accepted.\r\n");
+	if (value < 0 || value > 500) {	/* Arbitrary limits. */
+        send_to_char(ch, "0 to 500 accepted.\r\n");
         return (0);
       }
-      GET_SOUL_POINTS(vict) = RANGE(0, 10);
+      GET_SOUL_POINTS(vict) = RANGE(0, 500);
       break;
 	case 62: /* nowho */
 	  SET_OR_REMOVE(PRF_FLAGS(vict), (PRF_NOWHO));
@@ -3442,7 +3444,7 @@ static int perform_set(struct char_data *ch, struct char_data *vict, int mode, c
   if (set_fields[mode].type == BINARY) {
     send_to_char(ch, "%s %s for %s.\r\n", set_fields[mode].cmd, ONOFF(on), GET_NAME(vict));
   } else if (set_fields[mode].type == NUMBER) {
-    send_to_char(ch, "%s's %s set to %d.\r\n", GET_NAME(vict), set_fields[mode].cmd, value);
+    send_to_char(ch, "%s's %s set to %s.\r\n", GET_NAME(vict), set_fields[mode].cmd, add_commas(value));
   } else
     send_to_char(ch, "%s", CONFIG_OK);
 

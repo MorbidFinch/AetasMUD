@@ -58,8 +58,8 @@ static struct char_data *next_combat_list = NULL;
 /* local file scope utility functions */
 static void perform_group_gain(struct char_data *ch, int base, struct char_data *victim);
 static void dam_message(int dam, struct char_data *ch, struct char_data *victim, int w_type);
-static void make_corpse(struct char_data *ch);
-static void make_head(struct char_data * ch);
+static void make_corpse(struct char_data *ch, struct char_data *killer);
+static void make_head(struct char_data * ch, struct char_data *killer);
 static void change_alignment(struct char_data *ch, struct char_data *victim);
 static void group_gain(struct char_data *ch, struct char_data *victim);
 static void solo_gain(struct char_data *ch, struct char_data *victim);
@@ -71,6 +71,23 @@ static int compute_thaco(struct char_data *ch, struct char_data *vict);
 
 #define IS_WEAPON(type) (((type) >= TYPE_HIT) && ((type) < TYPE_SUFFERING))
 /* The Fight related routines */
+bool is_arena_combat(struct char_data *ch, struct char_data *vict)
+{
+  if (!ch || !ch->in_room)
+    return false;
+
+  if (!vict->in_room)
+    return false;
+
+  if (ROOM_FLAGGED(vict->in_room, ROOM_ARENA) || ROOM_FLAGGED(ch->in_room, ROOM_ARENA))
+    return true;
+
+  if (ZONE_FLAGGED(GET_ROOM_ZONE(vict->in_room), ZONE_ARENA) || ZONE_FLAGGED(GET_ROOM_ZONE(ch->in_room), ZONE_ARENA))
+    return true;
+
+  return false;
+}
+
 void appear(struct char_data *ch)
 {
   if (affected_by_spell(ch, SPELL_INVISIBLE))
@@ -119,6 +136,9 @@ void check_killer(struct char_data *ch, struct char_data *vict)
   if (PLR_FLAGGED(ch, PLR_KILLER) || IS_NPC(ch) || IS_NPC(vict) || ch == vict)
     return;
 
+  if (is_arena_combat(ch, vict))
+    return;
+
   SET_BIT_AR(PLR_FLAGS(ch), PLR_KILLER);
   send_to_char(ch, "If you want to be a \tRPLAYER KILLER\tn, so be it...\r\n");
   mudlog(BRF, LVL_IMMORT, TRUE, "PC Killer bit set on %s for initiating attack on %s at %s.",
@@ -164,7 +184,7 @@ void stop_fighting(struct char_data *ch)
   update_pos(ch);
 }
 
-static void make_head(struct char_data * ch)
+static void make_head(struct char_data *ch, struct char_data *killer)
 {
   char buf[MAX_NAME_LENGTH + 64];
   struct obj_data *head;
@@ -195,34 +215,41 @@ static void make_head(struct char_data * ch)
   
   GET_OBJ_WEIGHT(head) = 20;
   GET_OBJ_RENT(head) = 100000;
-  if (IS_NPC(ch))
+  
+  /* if the death occurs in an arena room or zone, the victim keeps his stuff */
+  if (!IS_NPC(ch) && is_arena_combat(ch, killer)) {
     GET_OBJ_TIMER(head) = CONFIG_MAX_NPC_CORPSE_TIME;
-  else
-    GET_OBJ_TIMER(head) = CONFIG_MAX_PC_CORPSE_TIME;
+  /* else his head equipment falls to the ground */
+  } else {
+    if (IS_NPC(ch))
+      GET_OBJ_TIMER(head) = CONFIG_MAX_NPC_CORPSE_TIME;
+    else
+      GET_OBJ_TIMER(head) = CONFIG_MAX_PC_CORPSE_TIME;
 
-  if (GET_EQ(ch, WEAR_HEAD)) {
-    obj_to_room(unequip_char(ch, WEAR_HEAD), ch->in_room);
-    GET_EQ(ch, WEAR_HEAD) = NULL;
+    if (GET_EQ(ch, WEAR_HEAD)) {
+      obj_to_room(unequip_char(ch, WEAR_HEAD), ch->in_room);
+      GET_EQ(ch, WEAR_HEAD) = NULL;
+    }
+    if (GET_EQ(ch, WEAR_FACE)) {
+      obj_to_room(unequip_char(ch, WEAR_FACE), ch->in_room);
+      GET_EQ(ch, WEAR_FACE) = NULL;
+    }
   }
-
   obj_to_room(head, ch->in_room);
+}
 
- }
-
-static void make_corpse(struct char_data *ch)
+static void make_corpse(struct char_data *ch, struct char_data *killer)
 {
-  char keywords[MAX_NAME_LENGTH + 64], shortdesc[MAX_NAME_LENGTH + 64], longdesc[MAX_NAME_LENGTH + 64];
+  char keywords[128], shortdesc[128], longdesc[128];
+  char is_are[16], corpse_type[64];
   struct obj_data *corpse, *o;
   struct obj_data *money;
   int i, x, y;
-
-  /*-----DID OUR VICTIM LOSE THEIR HEAD?--------*/
-
-  if (((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 303) && (GET_KILLED_BY(ch, DEATH_MSG_NO) == 1)) ||
-      ((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 302) && (GET_KILLED_BY(ch, DEATH_MSG_NO) == 2))) 
-   make_head(ch);
-
-/*----NOW MAKE THE CORPSE---------------------*/
+  int death_attacktype = 0;
+  
+  death_attacktype = GET_KILLED_BY(ch, DEATH_ATTACKTYPE);
+  
+  /*---- MAKE THE CORPSE---------------------*/
 
   corpse = create_obj();
 
@@ -230,104 +257,140 @@ static void make_corpse(struct char_data *ch)
   IN_ROOM(corpse) = NOWHERE;
   
   /*------ CORPSE SWITCHES ------*/
+  
+  /* check for undead, switch corpse and remains */
+  if (IS_UNDEAD(ch)) {
+    snprintf(corpse_type, sizeof(corpse_type), "remains");
+    snprintf(is_are, sizeof(is_are), "are");
+  } else {
+    snprintf(corpse_type, sizeof(corpse_type), "corpse");
+    snprintf(is_are, sizeof(is_are), "is");
+  }
 
-  if ((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 303) && (GET_KILLED_BY(ch, DEATH_MSG_NO) != 1)) {
-	snprintf(keywords, sizeof(keywords), "%s chopped %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The chopped up %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the chopped up %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 303) && (GET_KILLED_BY(ch, DEATH_MSG_NO) == 1)) ||
-           ((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 302) && (GET_KILLED_BY(ch, DEATH_MSG_NO) == 2))) {
-	snprintf(keywords, sizeof(keywords), "%s headless %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The headless %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the headless %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if ((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 5) || (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 26)) {
-	snprintf(keywords, sizeof(keywords), "%s charred %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The charred %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the charred %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 131) {
-	snprintf(keywords, sizeof(keywords), "%s backstabbed %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The backstabbed %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the backstabbed %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 314) {
-	snprintf(keywords, sizeof(keywords), "%s stabbed %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The stabbed %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the stabbed %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 312) {
-	snprintf(keywords, sizeof(keywords), "%s blasted %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The blasted %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the blasted %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 30) {
-	snprintf(keywords, sizeof(keywords), "%s shattered %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The shattered %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the shattered %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 301) {
-	snprintf(keywords, sizeof(keywords), "%s stung %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here, covered with stings.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the stung %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if ((GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 302) && (GET_KILLED_BY(ch, DEATH_MSG_NO) == 1)) {
-	snprintf(keywords, sizeof(keywords), "%s welted %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here, covered with welts.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the welted %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 304) {
-	snprintf(keywords, sizeof(keywords), "%s chewed %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here, covered with bite marks.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the chewed %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 305) {
-	snprintf(keywords, sizeof(keywords), "%s bruised %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The bruised %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the bruised %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 306) {
-	snprintf(keywords, sizeof(keywords), "%s crushed %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The crushed %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the crushed %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 307) {
-	snprintf(keywords, sizeof(keywords), "%s battered %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here, severely battered.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the battered %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 308) {
-	snprintf(keywords, sizeof(keywords), "%s shredded %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here in shreds.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the shredded %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 309) {
-	snprintf(keywords, sizeof(keywords), "%s mauled %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The mauled %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the mauled %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 310) {
-	snprintf(keywords, sizeof(keywords), "%s thrashed %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The thrashed %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the thrashed %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else if (GET_KILLED_BY(ch, DEATH_ATTACKTYPE) == 311) {
-	snprintf(keywords, sizeof(keywords), "%s pierced %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here, full of holes.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the pierced %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-  }
-  else {
-	snprintf(keywords, sizeof(keywords), "%s %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(longdesc, sizeof(longdesc), "The %s of %s is lying here.", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
-	snprintf(shortdesc, sizeof(shortdesc), "the %s of %s", IS_UNDEAD(ch) ? "remains" : "corpse", GET_NAME(ch));
+  /* decide on the descriptions of the corpse */
+  switch (death_attacktype) {
+    /* weapon attack types -------------------------------------------- */
+    case TYPE_HIT:
+      snprintf(keywords, sizeof(keywords), "%s beaten %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the beaten %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The beaten %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_STING:
+      snprintf(keywords, sizeof(keywords), "%s stung %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the stung %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here, covered with stings.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_WHIP:
+      /* he lost his head */
+      if (GET_KILLED_BY(ch, DEATH_MSG_NO) == 1) {
+        snprintf(keywords, sizeof(keywords), "%s headless %s", corpse_type, GET_NAME(ch));
+        snprintf(shortdesc, sizeof(shortdesc), "the headless %s of %s", corpse_type, GET_NAME(ch));
+	    snprintf(longdesc, sizeof(longdesc), "The headless %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+        make_head(ch, killer);
+      } else {
+        snprintf(keywords, sizeof(keywords), "%s welted %s", corpse_type, GET_NAME(ch));
+        snprintf(shortdesc, sizeof(shortdesc), "the welted %s of %s", corpse_type, GET_NAME(ch));
+	    snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here, covered with welts.", corpse_type, GET_NAME(ch), is_are);
+      }
+      break;
+    case TYPE_SLASH:
+      /* he lost his head */
+      if (GET_KILLED_BY(ch, DEATH_MSG_NO) == 4) {
+        snprintf(keywords, sizeof(keywords), "%s headless %s", corpse_type, GET_NAME(ch));
+        snprintf(shortdesc, sizeof(shortdesc), "the headless %s of %s", corpse_type, GET_NAME(ch));
+	    snprintf(longdesc, sizeof(longdesc), "The headless %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+        make_head(ch, killer);
+      } else {
+        snprintf(keywords, sizeof(keywords), "%s chopped %s", corpse_type, GET_NAME(ch));
+        snprintf(shortdesc, sizeof(shortdesc), "the chopped up %s of %s", corpse_type, GET_NAME(ch));
+	    snprintf(longdesc, sizeof(longdesc), "The chopped up %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      }
+      break;
+    case TYPE_BITE:
+      snprintf(keywords, sizeof(keywords), "%s chewed %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the chewed %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here, covered with bite marks.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_BLUDGEON:
+      snprintf(keywords, sizeof(keywords), "%s bruised %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the bruised %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The bruised %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_CRUSH:
+      snprintf(keywords, sizeof(keywords), "%s crushed %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the crushed %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The crushed %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_POUND:
+      snprintf(keywords, sizeof(keywords), "%s battered %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the battered %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here, severely battered.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_CLAW:
+      snprintf(keywords, sizeof(keywords), "%s shredded %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the shredded %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here in shreds.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_MAUL:
+      snprintf(keywords, sizeof(keywords), "%s mauled %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the mauled %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The mauled %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_THRASH:
+      snprintf(keywords, sizeof(keywords), "%s thrashed %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the thrashed %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The thrashed %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_PIERCE:
+      snprintf(keywords, sizeof(keywords), "%s pierced %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the pierced %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here, full of holes.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_BLAST:
+      snprintf(keywords, sizeof(keywords), "%s blasted %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the blasted %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The blasted %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_PUNCH:
+      snprintf(keywords, sizeof(keywords), "%s pummeled %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the pummeled %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The pummeled %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case TYPE_STAB:
+      snprintf(keywords, sizeof(keywords), "%s stabbed %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the stabbed %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The stabbed %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    /* skills --------------------------------------------------------- */
+    case SKILL_BACKSTAB:
+      snprintf(keywords, sizeof(keywords), "%s backstabbed %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the backstabbed %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The backstabbed %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    /* spells --------------------------------------------------------- */
+    case SPELL_BURNING_HANDS:
+    case SPELL_FIREBALL:
+      snprintf(keywords, sizeof(keywords), "%s charred %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the charred %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The charred %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    case SPELL_LIGHTNING_BOLT:
+      snprintf(keywords, sizeof(keywords), "%s shattered %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the shattered %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The shattered %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
+    default:
+      snprintf(keywords, sizeof(keywords), "%s %s", corpse_type, GET_NAME(ch));
+      snprintf(shortdesc, sizeof(shortdesc), "the %s of %s", corpse_type, GET_NAME(ch));
+	  snprintf(longdesc, sizeof(longdesc), "The %s of %s %s lying here.", corpse_type, GET_NAME(ch), is_are);
+      break;
   }
   
   corpse->name = strdup(keywords);
   corpse->description = strdup(longdesc);
   corpse->short_description = strdup(shortdesc);
   
-/*-----CORPSE CREATION CONSTANTS-----------------*/
+  /*-----CORPSE CREATION CONSTANTS-----------------*/
 
   GET_OBJ_TYPE(corpse) = ITEM_CONTAINER;
   for(x = y = 0; x < EF_ARRAY_MAX || y < TW_ARRAY_MAX; x++, y++) {
@@ -340,43 +403,52 @@ static void make_corpse(struct char_data *ch)
   SET_BIT_AR(GET_OBJ_EXTRA(corpse), ITEM_NODONATE);
   GET_OBJ_VAL(corpse, 0) = 0;	/* You can't store stuff in a corpse */
   GET_OBJ_VAL(corpse, 3) = 1;	/* corpse identifier */
-  GET_OBJ_WEIGHT(corpse) = GET_WEIGHT(ch) + IS_CARRYING_W(ch);
   GET_OBJ_RENT(corpse) = 100000;
-  if (IS_NPC(ch))
+  
+  /* if the death occurs in an arena room or zone, the victim keeps his stuff */
+  if (!IS_NPC(ch) && is_arena_combat(ch, killer)) {
+    GET_OBJ_WEIGHT(corpse) = GET_WEIGHT(ch);
     GET_OBJ_TIMER(corpse) = CONFIG_MAX_NPC_CORPSE_TIME;
-  else
-    GET_OBJ_TIMER(corpse) = CONFIG_MAX_PC_CORPSE_TIME;
+  /* else all of his stuff ends up in his corpse */
+  } else {
+    GET_OBJ_WEIGHT(corpse) = GET_WEIGHT(ch) + IS_CARRYING_W(ch);
+  
+    if (IS_NPC(ch))
+      GET_OBJ_TIMER(corpse) = CONFIG_MAX_NPC_CORPSE_TIME;
+    else
+      GET_OBJ_TIMER(corpse) = CONFIG_MAX_PC_CORPSE_TIME;
 
-  /* transfer character's inventory to the corpse */
-  corpse->contains = ch->carrying;
-  for (o = corpse->contains; o != NULL; o = o->next_content)
-    o->in_obj = corpse;
-  object_list_new_owner(corpse, NULL);
+    /* transfer character's inventory to the corpse */
+    corpse->contains = ch->carrying;
+    for (o = corpse->contains; o != NULL; o = o->next_content)
+      o->in_obj = corpse;
+  
+    object_list_new_owner(corpse, NULL);
 
-  /* transfer character's equipment to the corpse */
-  for (i = 0; i < NUM_WEARS; i++)
-    if (GET_EQ(ch, i)) {
-      remove_otrigger(GET_EQ(ch, i), ch);
-      obj_to_obj(unequip_char(ch, i), corpse);
+    /* transfer character's equipment to the corpse */
+    for (i = 0; i < NUM_WEARS; i++)
+      if (GET_EQ(ch, i)) {
+        remove_otrigger(GET_EQ(ch, i), ch);
+        obj_to_obj(unequip_char(ch, i), corpse);
+      }
+
+    /* transfer gold */
+    if (GET_GOLD(ch) > 0) {
+      /* following 'if' clause added to fix gold duplication loophole. The above
+       * line apparently refers to the old "partially log in, kill the game
+       * character, then finish login sequence" duping bug. The duplication has
+       * been fixed (knock on wood) but the test below shall live on, for a
+       * while. -gg 3/3/2002 */
+      if (IS_NPC(ch) || ch->desc) {
+        money = create_money(GET_GOLD(ch));
+        obj_to_obj(money, corpse);
+      }
+      GET_GOLD(ch) = 0;
     }
-
-  /* transfer gold */
-  if (GET_GOLD(ch) > 0) {
-    /* following 'if' clause added to fix gold duplication loophole. The above
-     * line apparently refers to the old "partially log in, kill the game
-     * character, then finish login sequence" duping bug. The duplication has
-     * been fixed (knock on wood) but the test below shall live on, for a
-     * while. -gg 3/3/2002 */
-    if (IS_NPC(ch) || ch->desc) {
-      money = create_money(GET_GOLD(ch));
-      obj_to_obj(money, corpse);
-    }
-    GET_GOLD(ch) = 0;
+    ch->carrying = NULL;
+    IS_CARRYING_N(ch) = 0;
+    IS_CARRYING_W(ch) = 0;
   }
-  ch->carrying = NULL;
-  IS_CARRYING_N(ch) = 0;
-  IS_CARRYING_W(ch) = 0;
-
   obj_to_room(corpse, IN_ROOM(ch));
 }
 
@@ -459,7 +531,12 @@ void raw_kill(struct char_data * ch, struct char_data * killer)
 
   update_pos(ch);
 
-  make_corpse(ch);
+  make_corpse(ch, killer);
+  
+  /* if the victim died in arena, crashsave him */
+  if (!IS_NPC(ch) && is_arena_combat(killer, ch))
+    Crash_rentsave(ch, 0);
+
   extract_char(ch);
 
   if (killer) {
@@ -470,19 +547,18 @@ void raw_kill(struct char_data * ch, struct char_data * killer)
 
 void die(struct char_data * ch, struct char_data * killer)
 {
- int soul;
+  int soul;
  
-  gain_exp(ch, -(GET_EXP(ch) / 2));
-  if (!IS_NPC(ch)) {
-  
-  soul = (GET_SOUL_POINTS(ch) - (GET_LEVEL(ch) / 4));
+  if (!IS_NPC(ch) && !is_arena_combat(killer, ch)) {
+    gain_exp(ch, -(GET_EXP(ch) / 2));
+    soul = (GET_SOUL_POINTS(ch) - (GET_LEVEL(ch) / 4));
 
-  if ((soul < 0) && (GET_LEVEL(ch) > 15))
-    GET_MAX_HIT(ch) = MAX(50, (GET_MAX_HIT(ch) * .9));
+    if ((soul < 0) && (GET_LEVEL(ch) > 15))
+      GET_MAX_HIT(ch) = MAX(50, (GET_MAX_HIT(ch) * .9));
 
+    GET_SOUL_POINTS(ch) = MAX(0, soul);
     REMOVE_BIT_AR(PLR_FLAGS(ch), PLR_KILLER);
     REMOVE_BIT_AR(PLR_FLAGS(ch), PLR_THIEF);
-	GET_SOUL_POINTS(ch) = MAX(0, soul);
   }
   raw_kill(ch, killer);
 }
@@ -501,9 +577,13 @@ static void perform_group_gain(struct char_data *ch, int base,
     share = MIN(CONFIG_MAX_EXP_GAIN, MAX(1, hap_share));
   }
 
+  /* if he is in arena, award only 1 exp */
+  if (is_arena_combat(ch, victim))
+    share = 1;
+  
   if (GET_LEVEL(ch) <= 49) {
    if (share > 1)
-    send_to_char(ch, "\tYYou receive your share of experience -- %d points.\tn\r\n", share);
+    send_to_char(ch, "\tYYou receive your share of experience -- %s points.\tn\r\n", add_commas(share));
    else
     send_to_char(ch, "\tYYou receive your share of experience -- one measly little point!\tn\r\n");
 	}
@@ -557,9 +637,13 @@ static void solo_gain(struct char_data *ch, struct char_data *victim)
     exp = MAX(happy_exp, 1);
   }
 
+  /* if he is in arena, award only 1 exp */
+  if (is_arena_combat(ch, victim))
+    exp = 1;
+  
   if (GET_LEVEL(ch) <= 49) {
    if (exp > 1)
-    send_to_char(ch, "\tYYou receive %d experience points.\tn\r\n", exp);
+    send_to_char(ch, "\tYYou receive %s experience points.\tn\r\n", add_commas(exp));
    else
     send_to_char(ch, "\tYYou receive one lousy experience point.\tn\r\n");
 }
@@ -885,7 +969,7 @@ int damage(struct char_data *ch, struct char_data *victim, int dam, int attackty
   GET_HIT(victim) -= dam;
 
   /* Gain exp for the hit */
-  if (ch != victim)
+  if (ch != victim && !is_arena_combat(ch, victim))
     gain_exp(ch, GET_LEVEL(victim) * dam);
 
   update_pos(victim);
@@ -974,9 +1058,12 @@ int damage(struct char_data *ch, struct char_data *victim, int dam, int attackty
     }
 
     if (!IS_NPC(victim)) {
-      mudlog(BRF, LVL_IMMORT, TRUE, "%s killed by %s at %s", GET_NAME(victim), GET_NAME(ch), world[IN_ROOM(victim)].name);
+      if (is_arena_combat(ch, victim))
+        mudlog(BRF, LVL_IMMORT, TRUE, "[ARENA] %s killed by %s at %s", GET_NAME(victim), GET_NAME(ch), world[IN_ROOM(victim)].name);
+      else
+        mudlog(BRF, LVL_IMMORT, TRUE, "%s killed by %s at %s", GET_NAME(victim), GET_NAME(ch), world[IN_ROOM(victim)].name);
       if (MOB_FLAGGED(ch, MOB_MEMORY))
-	forget(ch, victim);
+	    forget(ch, victim);
     }
     /* Cant determine GET_GOLD on corpse, so do now and store */
     if (IS_NPC(victim)) {
@@ -990,10 +1077,26 @@ int damage(struct char_data *ch, struct char_data *victim, int dam, int attackty
       sprintf(local_buf,"%ld", (long)local_gold);
     }
 	
-	if (!IS_NPC(victim))
-      GET_RIP_CNT(victim) += 1;
-     if (!IS_NPC(ch))
+    /* if a character kills a mob, increase character's kill count */
+    if (!IS_NPC(ch) && IS_NPC(victim))
       GET_KILL_CNT(ch) += 1;
+    /* if a mob kills a character, increase character's death count */
+    if (IS_NPC(ch) && !IS_NPC(victim))
+      GET_RIP_CNT(victim) += 1;
+    /* if a character is killed by another character, increase his death count */
+	if (!IS_NPC(victim)) {
+      if (is_arena_combat(ch, victim))
+        GET_ARENA_RIP_CNT(victim) += 1;
+      else
+        GET_PK_RIP_CNT(victim) += 1;
+    }
+    /* if a character kills another character, increase kill kill count */
+    if (!IS_NPC(ch)) {
+      if (is_arena_combat(ch, victim))
+        GET_ARENA_KILL_CNT(ch) += 1;
+      else
+        GET_PK_KILL_CNT(ch) += 1;
+    }
 	  
 	if (IS_NPC(victim) && (GET_RACE(victim) != RACE_UNDEAD)) 
         increase_blood(victim->in_room);
