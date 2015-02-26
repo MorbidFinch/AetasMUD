@@ -154,6 +154,7 @@ static void free_extra_descriptions(struct extra_descr_data *edesc);
 static bitvector_t asciiflag_conv_aff(char *flag);
 static int hsort(const void *a, const void *b);
 void strip_car(char *string);
+void randomize_object(struct obj_data *obj);
 
 
 /* this is to strip the newline character at end of mob long_desc */
@@ -1553,10 +1554,10 @@ static void parse_simple_mob(FILE *mob_f, int i, int nr)
   GET_DEFAULT_POS(mob_proto + i) = t[1];
   GET_SEX(mob_proto + i) = t[2];
 
-  GET_CLASS(mob_proto + i) = 0;
-  GET_REMORT(mob_proto + i) = 0;
+  GET_CLASS(mob_proto + i) = CLASS_MOBILE;
+  GET_REMORT(mob_proto + i) = CLASS_MOBILE;
   GET_GEN(mob_proto + i) = 0;
-  GET_RACE(mob_proto + i) = 0;
+  GET_RACE(mob_proto + i) = RACE_MOBILE;
   GET_WEIGHT(mob_proto + i) = 200;
   GET_HEIGHT(mob_proto + i) = 65;
 
@@ -2220,7 +2221,7 @@ static void load_zones(FILE *fl, char *zonename)
     error = 0;
     if (strchr("MOGEPDTV", ZCMD.command) == NULL) {	/* a 3-arg command */
       if (sscanf(ptr, " %d %d %d ", &tmp, &ZCMD.arg1, &ZCMD.arg2) != 3)
-	error = 1;
+	    error = 1;
     } else if (ZCMD.command=='V') { /* a string-arg command */
       if (sscanf(ptr, " %d %d %d %d %79s %79[^\f\n\r\t\v]", &tmp, &ZCMD.arg1, &ZCMD.arg2,
 		 &ZCMD.arg3, t1, t2) != 6)
@@ -2230,11 +2231,10 @@ static void load_zones(FILE *fl, char *zonename)
         ZCMD.sarg2 = strdup(t2);
 	  }
     } else {
-      if (sscanf(ptr, " %d %d %d %d ", &tmp, &ZCMD.arg1, &ZCMD.arg2,
-		 &ZCMD.arg3) != 4) 
-		 error = 1;
-		 
-	}
+      if (sscanf(ptr, " %d %d %d %d %d %d ", &tmp, &ZCMD.arg1, &ZCMD.arg2,
+		 &ZCMD.arg3, &ZCMD.arg4, &ZCMD.arg5) != 6) 
+	    error = 1;
+    }
 
     ZCMD.if_flag = tmp;
 
@@ -2473,6 +2473,11 @@ struct char_data *read_mobile(mob_vnum nr, int type) /* and mob_rnum */
   mob->player.time.birth = time(0);
   mob->player.time.played = 0;
   mob->player.time.logon = time(0);
+  
+  /* randomize mob gold
+     range: zero to .15 of the original value added or subtracted */
+  if (GET_GOLD(mob) > 0)
+    GET_GOLD(mob) = rand_value(GET_GOLD(mob), GET_GOLD(mob) * 0.15);
 
   mob_index[i].number++;
 
@@ -2612,6 +2617,46 @@ static void log_zone_error(zone_rnum zone, int cmd_no, const char *message)
 	ZCMD.command, zone_table[zone].number, ZCMD.line);
 }
 
+/* this is used in reset_zone() to randomize objects flagged for such */
+void randomize_object(struct obj_data *obj)
+{
+  int i;
+  
+  /* randomize applies */
+  for (i = 0; i < MAX_OBJ_AFFECT; i++)
+    if (obj->affected[i].location != APPLY_NONE
+        && obj->affected[i].location != APPLY_CLASS
+        && obj->affected[i].location != APPLY_RACE) {
+      if (obj->affected[i].modifier > 0)
+        obj->affected[i].modifier = rand_number(0, obj->affected[i].modifier);
+      else if (obj->affected[i].modifier < 0)
+        obj->affected[i].modifier = -rand_number(0, -obj->affected[i].modifier);   
+    }
+    
+  /* randomize affects */
+  for (i = 0; i < NUM_AFF_FLAGS; i++)
+    if (OBJAFF_FLAGGED(obj, i))
+      if (!rand_number(0, 24))
+        REMOVE_BIT_AR(GET_OBJ_AFFECT(obj), i);
+  
+  /* randomize values */
+  switch (GET_OBJ_TYPE(obj)) {
+    case ITEM_WEAPON:
+      /* for weapons we adjust the number and size of the damage dice
+         range: zero to one quarter of the original value added or subtracted */
+      GET_OBJ_VAL(obj, 1) = rand_value(GET_OBJ_VAL(obj, 1), (GET_OBJ_VAL(obj, 1) / 4));
+      GET_OBJ_VAL(obj, 2) = rand_value(GET_OBJ_VAL(obj, 2), (GET_OBJ_VAL(obj, 2) / 4));
+      break;
+    case ITEM_ARMOR:
+    case ITEM_CONTAINER:
+    case ITEM_MONEY:
+      /* for armor, containers, and money we adjust the AC, max contains, and amount
+         range: zero to one quarter of the original value added or subtracted */
+      GET_OBJ_VAL(obj, 0) = rand_value(GET_OBJ_VAL(obj, 0), (GET_OBJ_VAL(obj, 0) / 4));
+      break;
+  }
+}
+
 #define ZONE_ERROR(message) \
 	{ log_zone_error(zone, cmd_no, message); last_cmd = 0; }
 
@@ -2640,87 +2685,100 @@ void reset_zone(zone_rnum zone)
       break;
 
     case 'M':			/* read a mobile */
-      if (mob_index[ZCMD.arg1].number < ZCMD.arg2) {
-	mob = read_mobile(ZCMD.arg1, REAL);
-	char_to_room(mob, ZCMD.arg3);
+      if ((mob_index[ZCMD.arg1].number < ZCMD.arg2) &&
+          (rand_number(1, 100) <= ZCMD.arg4)) {
+	    mob = read_mobile(ZCMD.arg1, REAL);
+	    char_to_room(mob, ZCMD.arg3);
         load_mtrigger(mob);
         tmob = mob;
-	last_cmd = 1;
+	    last_cmd = 1;
       } else
-	last_cmd = 0;
-      tobj = NULL;
+	    last_cmd = 0;
+        tobj = NULL;
       break;
 
     case 'O':			/* read an object */
-      if (obj_index[ZCMD.arg1].number < ZCMD.arg2) {
-	if (ZCMD.arg3 != NOWHERE) {
-	  obj = read_object(ZCMD.arg1, REAL);
-	  obj_to_room(obj, ZCMD.arg3);
-	  last_cmd = 1;
+      if ((obj_index[ZCMD.arg1].number < ZCMD.arg2) &&
+          (rand_number(1, 100) <= ZCMD.arg4)) {
+	    if (ZCMD.arg3 != NOWHERE) {
+	      obj = read_object(ZCMD.arg1, REAL);
+          if (ZCMD.arg5) /* object set for random loads? */
+            randomize_object(obj);
+	      obj_to_room(obj, ZCMD.arg3);
+	      last_cmd = 1;
           load_otrigger(obj);
           tobj = obj;
-	} else {
-	  obj = read_object(ZCMD.arg1, REAL);
-	  IN_ROOM(obj) = NOWHERE;
-	  last_cmd = 1;
+	    } else {
+	      obj = read_object(ZCMD.arg1, REAL);
+	      IN_ROOM(obj) = NOWHERE;
+	      last_cmd = 1;
           tobj = obj;
-	}
+	    }
       } else
-	last_cmd = 0;
+	    last_cmd = 0;
       tmob = NULL;
       break;
 
     case 'P':			/* object to object */
-      if (obj_index[ZCMD.arg1].number < ZCMD.arg2) {
-	obj = read_object(ZCMD.arg1, REAL);
-	if (!(obj_to = get_obj_num(ZCMD.arg3))) {
-	  ZONE_ERROR("target obj not found, command disabled");
-	  ZCMD.command = '*';
-	  break;
-	}
-	obj_to_obj(obj, obj_to);
-	last_cmd = 1;
+      if ((obj_index[ZCMD.arg1].number < ZCMD.arg2) && 
+          (rand_number(1, 100) <= ZCMD.arg4)) {
+	    obj = read_object(ZCMD.arg1, REAL);
+	    if (!(obj_to = get_obj_num(ZCMD.arg3))) {
+	      ZONE_ERROR("target obj not found, command disabled");
+	      ZCMD.command = '*';
+	      break;
+	    }
+        if (ZCMD.arg5) /* object set for random loads? */
+            randomize_object(obj);
+	    obj_to_obj(obj, obj_to);
+	    last_cmd = 1;
         load_otrigger(obj);
         tobj = obj;
-      } else
-	last_cmd = 0;
+        } else
+	      last_cmd = 0;
       tmob = NULL;
       break;
 
     case 'G':			/* obj_to_char */
       if (!mob) {
-	char error[MAX_INPUT_LENGTH];
-	snprintf(error, sizeof(error), "attempt to give obj #%d to non-existant mob, command disabled", obj_index[ZCMD.arg1].vnum);
-	ZONE_ERROR(error);
-	ZCMD.command = '*';
-	break;
+	    char error[MAX_INPUT_LENGTH];
+	    snprintf(error, sizeof(error), "attempt to give obj #%d to non-existant mob, command disabled", obj_index[ZCMD.arg1].vnum);
+	    ZONE_ERROR(error);
+	    ZCMD.command = '*';
+	    break;
       }
-      if (obj_index[ZCMD.arg1].number < ZCMD.arg2) {
-	obj = read_object(ZCMD.arg1, REAL);
-	obj_to_char(obj, mob);
-	last_cmd = 1;
+      if ((obj_index[ZCMD.arg1].number < ZCMD.arg2) && 
+          (rand_number(1, 100) <= ZCMD.arg4)) {
+	    obj = read_object(ZCMD.arg1, REAL);
+        if (ZCMD.arg5) /* object set for random loads? */
+            randomize_object(obj);
+	    obj_to_char(obj, mob);
+	    last_cmd = 1;
         load_otrigger(obj);
         tobj = obj;
       } else
-	last_cmd = 0;
+	    last_cmd = 0;
       tmob = NULL;
       break;
 
     case 'E':			/* object to equipment list */
       if (!mob) {
-	char error[MAX_INPUT_LENGTH];
-	snprintf(error, sizeof(error), "trying to equip non-existant mob with obj #%d, command disabled", obj_index[ZCMD.arg1].vnum);
-	ZONE_ERROR(error);
-	ZCMD.command = '*';
-	break;
+	    char error[MAX_INPUT_LENGTH];
+	    snprintf(error, sizeof(error), "trying to equip non-existant mob with obj #%d, command disabled", obj_index[ZCMD.arg1].vnum);
+	    ZONE_ERROR(error);
+	    ZCMD.command = '*';
+	    break;
       }
-      if (obj_index[ZCMD.arg1].number < ZCMD.arg2) {
-	if (ZCMD.arg3 < 0 || ZCMD.arg3 >= NUM_WEARS) {
+      if ((obj_index[ZCMD.arg1].number < ZCMD.arg2) && 
+          (rand_number(1, 100) <= ZCMD.arg4)) {
+	    if (ZCMD.arg3 < 0 || ZCMD.arg3 >= NUM_WEARS) {
           char error[MAX_INPUT_LENGTH];
-	  snprintf(error, sizeof(error), "invalid equipment pos number (mob %s, obj %d, pos %d)", GET_NAME(mob), obj_index[ZCMD.arg2].vnum, ZCMD.arg3);
-	  ZONE_ERROR(error);
-	} else {
-	  obj = read_object(ZCMD.arg1, REAL);
+	      snprintf(error, sizeof(error), "invalid equipment pos number (mob %s, obj %d, pos %d)", GET_NAME(mob), obj_index[ZCMD.arg2].vnum, ZCMD.arg3);
+	      ZONE_ERROR(error);
+	    } else {
+	      obj = read_object(ZCMD.arg1, REAL);
+          if (ZCMD.arg5) /* object set for random loads? */
+            randomize_object(obj);
           IN_ROOM(obj) = IN_ROOM(mob);
           load_otrigger(obj);
           if (wear_otrigger(obj, mob, ZCMD.arg3)) {
@@ -2729,10 +2787,10 @@ void reset_zone(zone_rnum zone)
           } else
             obj_to_char(obj, mob);
           tobj = obj;
-	  last_cmd = 1;
-	}
+	      last_cmd = 1;
+	    }
       } else
-	last_cmd = 0;
+	    last_cmd = 0;
       tmob = NULL;
       break;
 
